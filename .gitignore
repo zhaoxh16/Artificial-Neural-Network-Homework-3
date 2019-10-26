@@ -1,2 +1,5 @@
 code/data
 code/train
+.vscode
+code/logs
+code/__pycache__
