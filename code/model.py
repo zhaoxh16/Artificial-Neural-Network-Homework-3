@@ -7,8 +7,7 @@ from tensorflow.contrib.lookup.lookup_ops import MutableHashTable
 from tensorflow.contrib.layers.python.layers import layers
 from tensorflow.contrib.session_bundle import exporter
 
-# from rnn_cell import GRUCell, BasicLSTMCell, MultiRNNCell, BasicRNNCell
-from rnn_cell import BasicRNNCell
+from rnn_cell import GRUCell, BasicLSTMCell, MultiRNNCell, BasicRNNCell
 
 PAD_ID = 0
 UNK_ID = 1
@@ -69,11 +68,16 @@ class RNN(object):
         self.embed_input = tf.nn.embedding_lookup(self.embed, self.index_input)
 
         # todo: implement 3 RNNCells (BasicRNNCell, GRUCell, BasicLSTMCell) in a multi-layer setting with #num_units neurons and #num_layers layers
-        cell_fw = BasicRNNCell(num_units)
-        cell_bw = BasicRNNCell(num_units)
+        # cell_fw = BasicRNNCell(num_units)
+        # cell_bw = BasicRNNCell(num_units)
+        cell_fw = GRUCell(num_units)
+        cell_bw = GRUCell(num_units)
+        # cell_fw = BasicLSTMCell(num_units)
+        # cell_bw = BasicLSTMCell(num_units)
 
         # todo: implement bidirectional RNN
         outputs, states = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, self.embed_input, self.texts_length, dtype=tf.float32, scope="rnn")
+        # use attention
         H = tf.concat(outputs, 2)  # shape: (batch, length, 2*num_units)
         length = tf.shape(H)[1]
 
@@ -93,13 +97,19 @@ class RNN(object):
             logits = tf.layers.dense(
                 flatten_M, num_labels, activation=None, name='projection')
 
+        # not use attention
+        # final_state = tf.concat([outputs[0][:, -1, :], outputs[1][:, 0, :]], 1)
+        # logits = tf.layers.dense(final_state, num_labels, activation=None, name='projection')
+
         # todo: calculate additional loss, feel free to add codes to calculate temporary results
         identity = tf.reshape(tf.tile(tf.diag(tf.ones([param_r])), [batch_size, 1]), [
                               batch_size, param_r, param_r])    # shape: (batch, param_r, param_r)
         self.penalized_term = tf.reduce_mean(tf.square(tf.norm(tf.matmul(A, A, transpose_b=True) - identity, ord='fro', axis=[-2, -1])))
 
         self.loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
-            labels=self.labels, logits=logits), name='loss') + 0.0001*self.penalized_term
+                                   labels=self.labels, logits=logits), name='loss') + 0.0001*self.penalized_term
+        # self.loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+        # labels=self.labels, logits=logits), name='loss') 
         predict_labels = tf.argmax(logits, 1, 'predict_labels')
         self.accuracy = tf.reduce_sum(
             tf.cast(tf.equal(self.labels, predict_labels), tf.int32), name='accuracy')

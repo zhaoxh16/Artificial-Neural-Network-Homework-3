@@ -12,6 +12,7 @@ from __future__ import print_function
 import collections
 import hashlib
 import numbers
+import tensorflow as tf
 
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
@@ -293,202 +294,211 @@ class BasicRNNCell(RNNCell):
         return output, output
 
 
-# class GRUCell(RNNCell):
-#     """Gated Recurrent Unit cell (cf. http://arxiv.org/abs/1406.1078)."""
+class GRUCell(RNNCell):
+    """Gated Recurrent Unit cell (cf. http://arxiv.org/abs/1406.1078)."""
 
-#     def __init__(self,
-#                  num_units,
-#                  activation=None,
-#                  reuse=None,
-#                  kernel_initializer=None,
-#                  bias_initializer=None):
-#         super(GRUCell, self).__init__(_reuse=reuse)
-#         self._num_units = num_units
-#         self._activation = activation or math_ops.tanh
-#         self._kernel_initializer = kernel_initializer
-#         self._bias_initializer = bias_initializer
+    def __init__(self,
+                 num_units,
+                 activation=None,
+                 reuse=None,
+                 kernel_initializer=None,
+                 bias_initializer=None):
+        super(GRUCell, self).__init__(_reuse=reuse)
+        self._num_units = num_units
+        self._activation = activation or math_ops.tanh
+        self._kernel_initializer = kernel_initializer
+        self._bias_initializer = bias_initializer
 
-#     @property
-#     def state_size(self):
-#         return self._num_units
+    @property
+    def state_size(self):
+        return self._num_units
 
-#     @property
-#     def output_size(self):
-#         return self._num_units
+    @property
+    def output_size(self):
+        return self._num_units
 
-#     def call(self, inputs, state):
-#         """Gated recurrent unit (GRU) with nunits cells."""
-#         with vs.variable_scope("gates"):    # Reset gate and update gate.
-#             # We start with bias of 1.0 to not reset and not update.
-#             bias_ones = self._bias_initializer
-#             if self._bias_initializer is None:
-#                 dtype = [a.dtype for a in [inputs, state]][0]
-#                 bias_ones = init_ops.constant_initializer(1.0, dtype=dtype)
-#             value = math_ops.sigmoid(
-#                 _linear([inputs, state], 2 * self._num_units, True, bias_ones,
-#                         self._kernel_initializer))
-#             r, u = array_ops.split(value=value, num_or_size_splits=2, axis=1)
-#         with vs.variable_scope("candidate"):
-#             # todo: calculate c and new_h according to GRU
-#             c =
-#         new_h =
-#         return new_h, new_h
-
-
-# _LSTMStateTuple = collections.namedtuple("LSTMStateTuple", ("c", "h"))
+    def call(self, inputs, state):
+        """Gated recurrent unit (GRU) with nunits cells."""
+        with vs.variable_scope("gates"):    # Reset gate and update gate.
+            # We start with bias of 1.0 to not reset and not update.
+            # bias_ones = self._bias_initializer
+            # if self._bias_initializer is None:
+            #     dtype = [a.dtype for a in [inputs, state]][0]
+            #     bias_ones = init_ops.constant_initializer(1.0, dtype=dtype)
+            value = math_ops.sigmoid(
+                _linear([inputs, state], 2 * self._num_units, False,
+                        kernel_initializer=self._kernel_initializer))
+            r, u = array_ops.split(value=value, num_or_size_splits=2, axis=1)
+        with vs.variable_scope("candidate"):
+            # todo: calculate c and new_h according to GRU
+            c = self._activation(_linear([inputs, tf.multiply(r, state)], self._num_units, False))
+        new_h = tf.multiply(1-u, state) + tf.multiply(u, c)
+        return new_h, new_h
 
 
-# class LSTMStateTuple(_LSTMStateTuple):
-#     """Tuple used by LSTM Cells for `state_size`, `zero_state`, and output state.
-#     Stores two elements: `(c, h)`, in that order.
-#     Only used when `state_is_tuple=True`.
-#     """
-#     __slots__ = ()
-
-#     @property
-#     def dtype(self):
-#         (c, h) = self
-#         if c.dtype != h.dtype:
-#             raise TypeError("Inconsistent internal state: %s vs %s" %
-#                             (str(c.dtype), str(h.dtype)))
-#         return c.dtype
+_LSTMStateTuple = collections.namedtuple("LSTMStateTuple", ("c", "h"))
 
 
-# class BasicLSTMCell(RNNCell):
-#     """Basic LSTM recurrent network cell.
-#     The implementation is based on: http://arxiv.org/abs/1409.2329.
-#     We add forget_bias (default: 1) to the biases of the forget gate in order to
-#     reduce the scale of forgetting in the beginning of the training.
-#     It does not allow cell clipping, a projection layer, and does not
-#     use peep-hole connections: it is the basic baseline.
-#     For advanced models, please use the full @{tf.nn.rnn_cell.LSTMCell}
-#     that follows.
-#     """
+class LSTMStateTuple(_LSTMStateTuple):
+    """Tuple used by LSTM Cells for `state_size`, `zero_state`, and output state.
+    Stores two elements: `(c, h)`, in that order.
+    Only used when `state_is_tuple=True`.
+    """
+    __slots__ = ()
 
-#     def __init__(self, num_units, forget_bias=1.0,
-#                  state_is_tuple=True, activation=None, reuse=None):
-#         """Initialize the basic LSTM cell.
-#         Args:
-#             num_units: int, The number of units in the LSTM cell.
-#             forget_bias: float, The bias added to forget gates (see above).
-#             state_is_tuple: If True, accepted and returned states are 2-tuples of
-#                 the `c_state` and `m_state`.    If False, they are concatenated
-#                 along the column axis.    The latter behavior will soon be deprecated.
-#             activation: Activation function of the inner states.    Default: `tanh`.
-#             reuse: (optional) Python boolean describing whether to reuse variables
-#                 in an existing scope.    If not `True`, and the existing scope already has
-#                 the given variables, an error is raised.
-#         """
-#         super(BasicLSTMCell, self).__init__(_reuse=reuse)
-#         if not state_is_tuple:
-#             logging.warn("%s: Using a concatenated state is slower and will soon be "
-#                          "deprecated.    Use state_is_tuple=True.", self)
-#         self._num_units = num_units
-#         self._forget_bias = forget_bias
-#         self._state_is_tuple = state_is_tuple
-#         self._activation = activation or math_ops.tanh
-
-#     @property
-#     def state_size(self):
-#         return (LSTMStateTuple(self._num_units, self._num_units)
-#                 if self._state_is_tuple else 2 * self._num_units)
-
-#     @property
-#     def output_size(self):
-#         return self._num_units
-
-#     def call(self, inputs, state):
-#         """Long short-term memory cell (LSTM)."""
-#         sigmoid = math_ops.sigmoid
-#         # Parameters of gates are concatenated into one multiply for efficiency.
-#         if self._state_is_tuple:
-#             c, h = state
-#         else:
-#             c, h = array_ops.split(value=state, num_or_size_splits=2, axis=1)
-
-#         # todo: calculate new_c and new_h according to LSTM
-#         new_c =
-#         new_h =
-
-#         if self._state_is_tuple:
-#             new_state = LSTMStateTuple(new_c, new_h)
-#         else:
-#             new_state = array_ops.concat([new_c, new_h], 1)
-#         return new_h, new_state
+    @property
+    def dtype(self):
+        (c, h) = self
+        if c.dtype != h.dtype:
+            raise TypeError("Inconsistent internal state: %s vs %s" %
+                            (str(c.dtype), str(h.dtype)))
+        return c.dtype
 
 
-# class MultiRNNCell(RNNCell):
-#     """RNN cell composed sequentially of multiple simple cells."""
+class BasicLSTMCell(RNNCell):
+    """Basic LSTM recurrent network cell.
+    The implementation is based on: http://arxiv.org/abs/1409.2329.
+    We add forget_bias (default: 1) to the biases of the forget gate in order to
+    reduce the scale of forgetting in the beginning of the training.
+    It does not allow cell clipping, a projection layer, and does not
+    use peep-hole connections: it is the basic baseline.
+    For advanced models, please use the full @{tf.nn.rnn_cell.LSTMCell}
+    that follows.
+    """
 
-#     def __init__(self, cells, state_is_tuple=True):
-#         """Create a RNN cell composed sequentially of a number of RNNCells.
-#         Args:
-#             cells: list of RNNCells that will be composed in this order.
-#             state_is_tuple: If True, accepted and returned states are n-tuples, where
-#                 `n = len(cells)`.    If False, the states are all
-#                 concatenated along the column axis.    This latter behavior will soon be
-#                 deprecated.
-#         Raises:
-#             ValueError: if cells is empty (not allowed), or at least one of the cells
-#                 returns a state tuple but the flag `state_is_tuple` is `False`.
-#         """
-#         super(MultiRNNCell, self).__init__()
-#         if not cells:
-#             raise ValueError(
-#                 "Must specify at least one cell for MultiRNNCell.")
-#         if not nest.is_sequence(cells):
-#             raise TypeError(
-#                 "cells must be a list or tuple, but saw: %s." % cells)
+    def __init__(self, num_units, forget_bias=1.0,
+                 state_is_tuple=True, activation=None, reuse=None):
+        """Initialize the basic LSTM cell.
+        Args:
+            num_units: int, The number of units in the LSTM cell.
+            forget_bias: float, The bias added to forget gates (see above).
+            state_is_tuple: If True, accepted and returned states are 2-tuples of
+                the `c_state` and `m_state`.    If False, they are concatenated
+                along the column axis.    The latter behavior will soon be deprecated.
+            activation: Activation function of the inner states.    Default: `tanh`.
+            reuse: (optional) Python boolean describing whether to reuse variables
+                in an existing scope.    If not `True`, and the existing scope already has
+                the given variables, an error is raised.
+        """
+        super(BasicLSTMCell, self).__init__(_reuse=reuse)
+        if not state_is_tuple:
+            logging.warn("%s: Using a concatenated state is slower and will soon be "
+                         "deprecated.    Use state_is_tuple=True.", self)
+        self._num_units = num_units
+        self._forget_bias = forget_bias
+        self._state_is_tuple = state_is_tuple
+        self._activation = activation or math_ops.tanh
 
-#         self._cells = cells
-#         self._state_is_tuple = state_is_tuple
-#         if not state_is_tuple:
-#             if any(nest.is_sequence(c.state_size) for c in self._cells):
-#                 raise ValueError("Some cells return tuples of states, but the flag "
-#                                  "state_is_tuple is not set.    State sizes are: %s"
-#                                  % str([c.state_size for c in self._cells]))
+    @property
+    def state_size(self):
+        return (LSTMStateTuple(self._num_units, self._num_units)
+                if self._state_is_tuple else 2 * self._num_units)
 
-#     @property
-#     def state_size(self):
-#         if self._state_is_tuple:
-#             return tuple(cell.state_size for cell in self._cells)
-#         else:
-#             return sum([cell.state_size for cell in self._cells])
+    @property
+    def output_size(self):
+        return self._num_units
 
-#     @property
-#     def output_size(self):
-#         return self._cells[-1].output_size
+    def call(self, inputs, state):
+        """Long short-term memory cell (LSTM)."""
+        # Parameters of gates are concatenated into one multiply for efficiency.
+        if self._state_is_tuple:
+            c, h = state
+        else:
+            c, h = array_ops.split(value=state, num_or_size_splits=2, axis=1)
 
-#     def zero_state(self, batch_size, dtype):
-#         with ops.name_scope(type(self).__name__ + "ZeroState", values=[batch_size]):
-#             if self._state_is_tuple:
-#                 return tuple(cell.zero_state(batch_size, dtype) for cell in self._cells)
-#             else:
-#                 # We know here that state_size of each cell is not a tuple and
-#                 # presumably does not contain TensorArrays or anything else fancy
-#                 return super(MultiRNNCell, self).zero_state(batch_size, dtype)
+        # todo: calculate new_c and new_h according to LSTM
+        with tf.variable_scope('input_gate'):
+            input_gate = tf.sigmoid(_linear([inputs, h], self._num_units, True))    # shape: (batch_size, self._num_units)
+        with tf.variable_scope('output_gate'):
+            output_gate = tf.sigmoid(_linear([inputs, h], self._num_units, True))   # shape: (batch_size, self._num_units)
+        with tf.variable_scope('forget_gate'):
+            dtype = [a.dtype for a in [inputs, h]][0]
+            bias_ones = init_ops.constant_initializer(self._forget_bias, dtype=dtype)
+            forget_gate = tf.sigmoid(_linear([inputs, h], self._num_units, True, bias_ones))   # shape: (batch_size, self._num_units)
+        with tf.variable_scope('update'):
+            new_c = self._activation(_linear([inputs, h], self._num_units, True))   # shape: (batch_size, self._num_units)
+        new_c = tf.multiply(forget_gate, c) + tf.multiply(input_gate, new_c)
+        new_h = tf.multiply(output_gate, tf.tanh(new_c))
 
-#     def call(self, inputs, state):
-#         """Run this multi-layer cell on inputs, starting from state."""
-#         cur_state_pos = 0
-#         cur_inp = inputs
-#         new_states = []
-#         for i, cell in enumerate(self._cells):
-#             with vs.variable_scope("cell_%d" % i):
-#                 if self._state_is_tuple:
-#                     if not nest.is_sequence(state):
-#                         raise ValueError(
-#                             "Expected state to be a tuple of length %d, but received: %s" %
-#                             (len(self.state_size), state))
-#                     cur_state = state[i]
-#                 else:
-#                     cur_state = array_ops.slice(state, [0, cur_state_pos],
-#                                                 [-1, cell.state_size])
-#                     cur_state_pos += cell.state_size
-#                 cur_inp, new_state = cell(cur_inp, cur_state)
-#                 new_states.append(new_state)
+        if self._state_is_tuple:
+            new_state = LSTMStateTuple(new_c, new_h)
+        else:
+            new_state = array_ops.concat([new_c, new_h], 1)
+        return new_h, new_state
 
-#         new_states = (tuple(new_states) if self._state_is_tuple else
-#                       array_ops.concat(new_states, 1))
 
-#         return cur_inp, new_states
+class MultiRNNCell(RNNCell):
+    """RNN cell composed sequentially of multiple simple cells."""
+
+    def __init__(self, cells, state_is_tuple=True):
+        """Create a RNN cell composed sequentially of a number of RNNCells.
+        Args:
+            cells: list of RNNCells that will be composed in this order.
+            state_is_tuple: If True, accepted and returned states are n-tuples, where
+                `n = len(cells)`.    If False, the states are all
+                concatenated along the column axis.    This latter behavior will soon be
+                deprecated.
+        Raises:
+            ValueError: if cells is empty (not allowed), or at least one of the cells
+                returns a state tuple but the flag `state_is_tuple` is `False`.
+        """
+        super(MultiRNNCell, self).__init__()
+        if not cells:
+            raise ValueError(
+                "Must specify at least one cell for MultiRNNCell.")
+        if not nest.is_sequence(cells):
+            raise TypeError(
+                "cells must be a list or tuple, but saw: %s." % cells)
+
+        self._cells = cells
+        self._state_is_tuple = state_is_tuple
+        if not state_is_tuple:
+            if any(nest.is_sequence(c.state_size) for c in self._cells):
+                raise ValueError("Some cells return tuples of states, but the flag "
+                                 "state_is_tuple is not set.    State sizes are: %s"
+                                 % str([c.state_size for c in self._cells]))
+
+    @property
+    def state_size(self):
+        if self._state_is_tuple:
+            return tuple(cell.state_size for cell in self._cells)
+        else:
+            return sum([cell.state_size for cell in self._cells])
+
+    @property
+    def output_size(self):
+        return self._cells[-1].output_size
+
+    def zero_state(self, batch_size, dtype):
+        with ops.name_scope(type(self).__name__ + "ZeroState", values=[batch_size]):
+            if self._state_is_tuple:
+                return tuple(cell.zero_state(batch_size, dtype) for cell in self._cells)
+            else:
+                # We know here that state_size of each cell is not a tuple and
+                # presumably does not contain TensorArrays or anything else fancy
+                return super(MultiRNNCell, self).zero_state(batch_size, dtype)
+
+    def call(self, inputs, state):
+        """Run this multi-layer cell on inputs, starting from state."""
+        cur_state_pos = 0
+        cur_inp = inputs
+        new_states = []
+        for i, cell in enumerate(self._cells):
+            with vs.variable_scope("cell_%d" % i):
+                if self._state_is_tuple:
+                    if not nest.is_sequence(state):
+                        raise ValueError(
+                            "Expected state to be a tuple of length %d, but received: %s" %
+                            (len(self.state_size), state))
+                    cur_state = state[i]
+                else:
+                    cur_state = array_ops.slice(state, [0, cur_state_pos],
+                                                [-1, cell.state_size])
+                    cur_state_pos += cell.state_size
+                cur_inp, new_state = cell(cur_inp, cur_state)
+                new_states.append(new_state)
+
+        new_states = (tuple(new_states) if self._state_is_tuple else
+                      array_ops.concat(new_states, 1))
+
+        return cur_inp, new_states

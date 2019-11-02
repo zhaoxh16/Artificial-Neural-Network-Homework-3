@@ -1,5 +1,10 @@
 code/data
-code/train
 .vscode
-code/logs
 code/__pycache__
+code/basic_lstm
+code/basic_lstm_attention
+code/basic_rnn
+code/basic_rnn_attention
+code/final_result
+code/gru
+code/gru_attention

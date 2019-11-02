@@ -4,19 +4,25 @@ from tensorflow.python.framework import constant_op
 import time
 import random
 from model import RNN, _START_VOCAB
-random.seed(1229)
+import os
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('AGG')
+random.seed(11351)
+np.random.seed(11351)
+tf.set_random_seed(11351)
 
 
 tf.app.flags.DEFINE_boolean("is_train", True, "Set to False to inference.")
 tf.app.flags.DEFINE_integer("symbols", 18430, "vocabulary size.")
 tf.app.flags.DEFINE_integer("labels", 5, "Number of labels.")
-tf.app.flags.DEFINE_float("learning_rate", 0.005, "Number of labels.")
-tf.app.flags.DEFINE_integer("epoch", 20, "Number of epoch.")
+tf.app.flags.DEFINE_float("learning_rate", 0.005, "Learning rate.")
+tf.app.flags.DEFINE_integer("epoch", 100, "Number of epoch.")
 tf.app.flags.DEFINE_integer("embed_units", 300, "Size of word embedding.")
 tf.app.flags.DEFINE_integer("units", 512, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("layers", 1, "Number of layers in the model.")
 tf.app.flags.DEFINE_integer(
-    "batch_size", 16, "Batch size to use during training.")
+    "batch_size", 64, "Batch size to use during training.")
 tf.app.flags.DEFINE_string("data_dir", "./data", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "./train", "Training directory.")
 tf.app.flags.DEFINE_integer("per_checkpoint", 1000,
@@ -166,19 +172,38 @@ with tf.Session(config=config) as sess:
                                               constant_op.constant(list(range(FLAGS.symbols)), dtype=tf.int64))
             sess.run(op_in)
 
-        writer = tf.summary.FileWriter("logs/", sess.graph)
+        writer = tf.summary.FileWriter(FLAGS.train_dir, sess.graph)
 
+        train_loss = []
+        train_acc = []
+        dev_loss = []
+        dev_acc = []
         for epoch in list(range(FLAGS.epoch)):
             random.shuffle(data_train)
             start_time = time.time()
             loss, accuracy = train(model, sess, data_train)
+            train_loss.append(loss)
+            train_acc.append(accuracy)
             print("epoch %d learning rate %.4f epoch-time %.4f loss %.8f accuracy [%.8f]" % (
                 epoch, model.learning_rate.eval(), time.time()-start_time, loss, accuracy))
             model.saver.save(sess, '%s/checkpoint' %
                              FLAGS.train_dir, global_step=epoch)
             loss, accuracy = evaluate(model, sess, data_dev)
-            print("        dev_set, loss %.8f, accuracy [%.8f]" % (
-                loss, accuracy))
+            dev_loss.append(loss)
+            dev_acc.append(accuracy)
+            print("        dev_set, loss %.8f, accuracy [%.8f]" % (loss, accuracy))
+            plt.cla()
+            plt.plot(list(range(1, len(train_loss)+1)), train_loss, label='train')
+            plt.plot(list(range(1, len(dev_loss)+1)), dev_loss, label='dev')
+            plt.legend()
+            plt.savefig(os.path.join(FLAGS.train_dir, "loss.png"))
+            plt.cla()
+            plt.plot(list(range(1, len(train_acc)+1)), train_acc, label='train')
+            plt.plot(list(range(1, len(dev_acc)+1)), dev_acc, label='dev')
+            plt.legend()
+            plt.savefig(os.path.join(FLAGS.train_dir, "accuracy.png"))
+        
+        writer.close()
     else:
         data_dev = load_data(FLAGS.data_dir, 'dev.txt')
         data_test = load_data(FLAGS.data_dir, 'test.txt')
